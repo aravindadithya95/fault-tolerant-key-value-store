@@ -177,7 +177,7 @@ void MP2Node::clientRead(string key) {
 	}
 
 	// keep track of responses to check for quorum
-	QuorumEntry entry(key);
+	QuorumEntry entry(READ, key);
 	quorums.emplace(g_transID, entry);
 }
 
@@ -225,12 +225,30 @@ void MP2Node::clientUpdate(string key, string value) {
  * 				The function does the following:
  * 				1) Constructs the message
  * 				2) Finds the replicas of this key
- * 				3) Sends a message to the replica
+ * 				3) Sends a message to the replicas
  */
-void MP2Node::clientDelete(string key){
+void MP2Node::clientDelete(string key) {
 	/*
-	 * Implement this
+	 * Step 1: Construct the message
 	 */
+	g_transID++;
+	Message msg(g_transID, memberNode->addr, DELETE, key);
+
+	/*
+	 * Step 2: Find the replicas of this key
+	 */
+	vector<Node> replicas = findNodes(key);
+
+	/*
+	 * Step 3: Send message to the replicas
+	 */
+	for ( int i = 0; i < replicas.size(); i++ ) {
+		dispatchMessage(msg, replicas[i].getAddress());
+	}
+
+	// keep track of responses to check for quorum
+	QuorumEntry entry(DELETE, key);
+	quorums.emplace(g_transID, entry);
 }
 
 /**
@@ -280,11 +298,9 @@ bool MP2Node::updateKeyValue(string key, string value, ReplicaType replica) {
  * 				1) Delete the key from the local hash table
  * 				2) Return true or false based on success or failure
  */
-bool MP2Node::deletekey(string key) {
-	/*
-	 * Implement this
-	 */
+bool MP2Node::deleteKey(string key) {
 	// Delete the key from the local hash table
+	return ht->deleteKey(key);
 }
 
 /**
@@ -328,6 +344,10 @@ void MP2Node::checkMessages() {
 			
 			case UPDATE:
 				handleUPDATE(&msg);
+				break;
+			
+			case DELETE:
+				handleDELETE(&msg);
 				break;
 
 			case REPLY:
@@ -481,7 +501,7 @@ void MP2Node::handleREAD(Message *msg) {
 void MP2Node::handleUPDATE(Message *msg) {
 	g_transID++;
 
-	// enter the pair into the local hash table
+	// update the pair in the local hash table
 	bool success = updateKeyValue(msg->key, msg->value, msg->replica);
 
 #ifdef DEBUGLOG
@@ -489,6 +509,30 @@ void MP2Node::handleUPDATE(Message *msg) {
 		log->logUpdateSuccess(&memberNode->addr, false, g_transID, msg->key, msg->value);
 	} else {
 		log->logUpdateFail(&memberNode->addr, false, g_transID, msg->key, msg->value);
+	}
+#endif
+
+	// send response back to the coordinator
+	Message responseMsg(msg->transID, memberNode->addr, REPLY, success);
+	dispatchMessage(responseMsg, &msg->fromAddr);
+}
+
+/**
+ * FUNCTION NAME: handleDELETE
+ *
+ * DESCRIPTION: Handle an incoming DELETE message
+ */
+void MP2Node::handleDELETE(Message *msg) {
+	g_transID++;
+
+	// delete the key-value pair in the local hash table
+	bool success = deleteKey(msg->key);
+
+#ifdef DEBUGLOG
+	if ( success ) {
+		log->logDeleteSuccess(&memberNode->addr, false, g_transID, msg->key);
+	} else {
+		log->logDeleteFail(&memberNode->addr, false, g_transID, msg->key);
 	}
 #endif
 
@@ -519,8 +563,10 @@ void MP2Node::handleREPLY(Message *msg) {
 #ifdef DEBUGLOG
 		if ( entry->second.type == CREATE ) {
 			log->logCreateSuccess(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
-		} else {
+		} else if ( entry->second.type == UPDATE ) {
 			log->logUpdateSuccess(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		} else if ( entry->second.type == DELETE ) {
+			log->logDeleteSuccess(&memberNode->addr, true, ++g_transID, entry->second.key);
 		}
 #endif
 		quorums.erase(msg->transID);
@@ -528,8 +574,10 @@ void MP2Node::handleREPLY(Message *msg) {
 #ifdef DEBUGLOG
 		if ( entry->second.type == CREATE ) {
 			log->logCreateFail(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
-		} else {
+		} else if ( entry->second.type == UPDATE ) {
 			log->logUpdateFail(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		} else if ( entry->second.type == DELETE ) {
+			log->logDeleteFail(&memberNode->addr, true, ++g_transID, entry->second.key);
 		}
 #endif
 		quorums.erase(msg->transID);

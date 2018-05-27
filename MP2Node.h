@@ -43,8 +43,9 @@ public:
 		negativeAcks = 0;
 	}
 
-	// constructor for READ quorum entry
-	QuorumEntry(string key) {
+	// constructor for READ and DELETE quorum entry
+	QuorumEntry(MessageType type, string key) {
+		this->type = type;
 		this->key = key;
 		positiveAcks = 0;
 		negativeAcks = 0;
@@ -118,7 +119,7 @@ public:
 	bool createKeyValue(string key, string value, ReplicaType replica);
 	string readKey(string key);
 	bool updateKeyValue(string key, string value, ReplicaType replica);
-	bool deletekey(string key);
+	bool deleteKey(string key);
 
 	// stabilization protocol - handle multiple failures
 	void stabilizationProtocol();
@@ -126,6 +127,7 @@ public:
 	void handleCREATE(Message *msg);
 	void handleREAD(Message *msg);
 	void handleUPDATE(Message *msg);
+	void handleDELETE(Message *msg);
 	void handleREPLY(Message *msg);
 	void handleREADREPLY(Message *msg);
 
