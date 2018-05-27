@@ -35,9 +35,6 @@ MP2Node::~MP2Node() {
  * 				3) Calls the Stabilization Protocol
  */
 void MP2Node::updateRing() {
-	/*
-	 * Implement this. Parts of it are already implemented
-	 */
 	vector<Node> curMemList;
 	bool change = false;
 
@@ -52,11 +49,27 @@ void MP2Node::updateRing() {
 	// Sort the list based on the hashCode
 	sort(curMemList.begin(), curMemList.end());
 
+	// check if there has been a change in the ring
+	if ( ring.size() != curMemList.size() ) {
+		change = true;
+	} else {
+		for ( int i = 0; i < curMemList.size(); i++ ) {
+			if ( curMemList[i].getHashCode() != ring[i].getHashCode() ) {
+				change = true;
+				break;
+			}
+		}
+	}
+
+	ring = curMemList;
 
 	/*
 	 * Step 3: Run the stabilization protocol IF REQUIRED
 	 */
 	// Run stabilization protocol if the hash table size is greater than zero and if there has been a changed in the ring
+	if ( !ht->isEmpty() && change ) {
+		stabilizationProtocol();
+	}
 }
 
 /**
