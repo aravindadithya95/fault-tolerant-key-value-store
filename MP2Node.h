@@ -28,18 +28,22 @@
  */
 class QuorumEntry {
 public:
+	MessageType type;
 	string key;
 	string value;
 	int positiveAcks;
 	int negativeAcks;
 
-	QuorumEntry(string key, string value) {
+	// constructor for CREATE and UPDATE quorum entry
+	QuorumEntry(MessageType type, string key, string value) {
+		this->type = type;
 		this->key = key;
 		this->value = value;
 		positiveAcks = 0;
 		negativeAcks = 0;
 	}
 
+	// constructor for READ quorum entry
 	QuorumEntry(string key) {
 		this->key = key;
 		positiveAcks = 0;
@@ -121,6 +125,7 @@ public:
 
 	void handleCREATE(Message *msg);
 	void handleREAD(Message *msg);
+	void handleUPDATE(Message *msg);
 	void handleREPLY(Message *msg);
 	void handleREADREPLY(Message *msg);
 

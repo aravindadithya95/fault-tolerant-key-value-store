@@ -144,7 +144,7 @@ void MP2Node::clientCreate(string key, string value) {
 	}
 
 	// keep track of responses to check for quorum
-	QuorumEntry entry(key, value);
+	QuorumEntry entry(CREATE, key, value);
 	quorums.emplace(g_transID, entry);
 }
 
@@ -157,7 +157,7 @@ void MP2Node::clientCreate(string key, string value) {
  * 				2) Finds the replicas of this key
  * 				3) Sends a message to the replicas
  */
-void MP2Node::clientRead(string key){
+void MP2Node::clientRead(string key) {
 	/*
 	 * Step 1: Construct the message
 	 */
@@ -188,12 +188,34 @@ void MP2Node::clientRead(string key){
  * 				The function does the following:
  * 				1) Constructs the message
  * 				2) Finds the replicas of this key
- * 				3) Sends a message to the replica
+ * 				3) Sends a message to the replicas
  */
-void MP2Node::clientUpdate(string key, string value){
+void MP2Node::clientUpdate(string key, string value) {
 	/*
-	 * Implement this
+	 * Step 1: Construct the message
 	 */
+	g_transID++;
+	Message primaryMsg(g_transID, memberNode->addr, UPDATE, key, value, PRIMARY);
+	Message secondaryMsg(g_transID, memberNode->addr, UPDATE, key, value, SECONDARY);
+	Message tertiaryMsg(g_transID, memberNode->addr, UPDATE, key, value, TERTIARY);
+
+	/*
+	 * Step 2: Find the replicas of this key
+	 */
+	vector<Node> replicas = findNodes(key);
+
+	/*
+	 * Step 3: Send message to the replicas
+	 */
+	if ( replicas.size() == 3 ) {
+		dispatchMessage(primaryMsg, replicas[0].getAddress());
+		dispatchMessage(secondaryMsg, replicas[1].getAddress());
+		dispatchMessage(tertiaryMsg, replicas[2].getAddress());
+	}
+
+	// keep track of responses to check for quorum
+	QuorumEntry entry(UPDATE, key, value);
+	quorums.emplace(g_transID, entry);
 }
 
 /**
@@ -246,10 +268,8 @@ string MP2Node::readKey(string key) {
  * 				2) Return true or false based on success or failure
  */
 bool MP2Node::updateKeyValue(string key, string value, ReplicaType replica) {
-	/*
-	 * Implement this
-	 */
 	// Update key in local hash table and return true or false
+	return ht->update(key, value);
 }
 
 /**
@@ -304,6 +324,10 @@ void MP2Node::checkMessages() {
 			
 			case READ:
 				handleREAD(&msg);
+				break;
+			
+			case UPDATE:
+				handleUPDATE(&msg);
 				break;
 
 			case REPLY:
@@ -421,15 +445,14 @@ void MP2Node::handleCREATE(Message *msg) {
 #endif
 
 	// send response back to the coordinator
-	Message responseMsg(g_transID, memberNode->addr, REPLY, success);
-	responseMsg.transID = msg->transID;
+	Message responseMsg(msg->transID, memberNode->addr, REPLY, success);
 	dispatchMessage(responseMsg, &msg->fromAddr);
 }
 
 /**
- * FUNCTION NAME: handleREPLY
+ * FUNCTION NAME: handleREAD
  *
- * DESCRIPTION: Handle an incoming REPLY message
+ * DESCRIPTION: Handle an incoming READ message
  */
 void MP2Node::handleREAD(Message *msg) {
 	g_transID++;
@@ -447,6 +470,30 @@ void MP2Node::handleREAD(Message *msg) {
 
 	// send response back to the coordinator
 	Message responseMsg(msg->transID, memberNode->addr, value);
+	dispatchMessage(responseMsg, &msg->fromAddr);
+}
+
+/**
+ * FUNCTION NAME: handleUPDATE
+ *
+ * DESCRIPTION: Handle an incoming READ message
+ */
+void MP2Node::handleUPDATE(Message *msg) {
+	g_transID++;
+
+	// enter the pair into the local hash table
+	bool success = updateKeyValue(msg->key, msg->value, msg->replica);
+
+#ifdef DEBUGLOG
+	if ( success ) {
+		log->logUpdateSuccess(&memberNode->addr, false, g_transID, msg->key, msg->value);
+	} else {
+		log->logUpdateFail(&memberNode->addr, false, g_transID, msg->key, msg->value);
+	}
+#endif
+
+	// send response back to the coordinator
+	Message responseMsg(msg->transID, memberNode->addr, REPLY, success);
 	dispatchMessage(responseMsg, &msg->fromAddr);
 }
 
@@ -470,12 +517,20 @@ void MP2Node::handleREPLY(Message *msg) {
 	// check if quorum is reached (positive or negative) and then delete the entry
 	if ( entry->second.positiveAcks == 2 ) {
 #ifdef DEBUGLOG
-		log->logCreateSuccess(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		if ( entry->second.type == CREATE ) {
+			log->logCreateSuccess(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		} else {
+			log->logUpdateSuccess(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		}
 #endif
 		quorums.erase(msg->transID);
 	} else if ( entry->second.negativeAcks == 2 ) {
 #ifdef DEBUGLOG
-		log->logCreateFail(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		if ( entry->second.type == CREATE ) {
+			log->logCreateFail(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		} else {
+			log->logUpdateFail(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+		}
 #endif
 		quorums.erase(msg->transID);
 	}
