@@ -51,13 +51,14 @@ private:
 	Log * log;
 
 	// Information for the coordinator to check for quorums
-	struct coordEntry {
+	struct quorumEntry {
 		string key;
 		string value;
-		int responses;
+		int positiveAcks;
+		int negativeAcks;
 	};
 	// Hash Map for response messages to check for quorums
-	unordered_map<int, coordEntry> quorum;
+	unordered_map<int, quorumEntry> quorums;
 
 public:
 	MP2Node(Member *memberNode, Params *par, EmulNet *emulNet, Log *log, Address *addressOfMember);

@@ -125,9 +125,9 @@ void MP2Node::clientCreate(string key, string value) {
 	 * Step 1: Construct the message
 	 */
 	g_transID++;
-	Message messagePrimary(g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
-	Message messageSecondary(g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
-	Message messageTertiary(g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+	Message primaryMsg(g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+	Message secondaryMsg(g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+	Message tertiaryMsg(g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
 
 	/*
 	 * Step 2: Find the replicas of this key
@@ -138,14 +138,14 @@ void MP2Node::clientCreate(string key, string value) {
 	 * Step 3: Send message to the replicas
 	 */
 	if ( replicas.size() == 3 ) {
-		dispatchMessage(messagePrimary, replicas[0].getAddress());
-		dispatchMessage(messagePrimary, replicas[1].getAddress());
-		dispatchMessage(messagePrimary, replicas[2].getAddress());
+		dispatchMessage(primaryMsg, replicas[0].getAddress());
+		dispatchMessage(secondaryMsg, replicas[1].getAddress());
+		dispatchMessage(tertiaryMsg, replicas[2].getAddress());
 	}
 
 	// keep track of responses to check for quorum
-	coordEntry entry { key, value, 0 };
-	quorum[g_transID] = entry;
+	quorumEntry entry { key, value, 0, 0 };
+	quorums.emplace(g_transID, entry);
 }
 
 /**
@@ -155,12 +155,30 @@ void MP2Node::clientCreate(string key, string value) {
  * 				The function does the following:
  * 				1) Constructs the message
  * 				2) Finds the replicas of this key
- * 				3) Sends a message to the replica
+ * 				3) Sends a message to the replicas
  */
 void MP2Node::clientRead(string key){
 	/*
-	 * Implement this
+	 * Step 1: Construct the message
 	 */
+	g_transID++;
+	Message msg(g_transID, memberNode->addr, CREATE, key);
+
+	/*
+	 * Step 2: Find the replicas of this key
+	 */
+	vector<Node> replicas = findNodes(key);
+
+	/*
+	 * Step 3: Send message to the replicas
+	 */
+	for ( int i = 0; i < replicas.size(); i++ ) {
+		dispatchMessage(msg, replicas[i].getAddress());
+	}
+
+	// keep track of responses to check for quorum
+	// coordEntry entry { key, value, 0, 0 };
+	// quorum[g_transID] = entry;
 }
 
 /**
@@ -408,23 +426,27 @@ void MP2Node::handleCREATE(Message *msg) {
  * DESCRIPTION: Handle an incoming REPLY message
  */
 void MP2Node::handleREPLY(Message *msg) {
-	unordered_map<int, coordEntry>::iterator entry = quorum.find(msg->transID);
-	if ( entry == quorum.end())	return;
-	if ( entry->second.responses == 0 && msg->success ) {
-		entry->second.responses = 1;
-		return;
-	}
-	g_transID++;
+	// find the quorum entry
+	unordered_map<int, quorumEntry>::iterator entry = quorums.find(msg->transID);
+	if ( entry == quorums.end() )	return;
 
-#ifdef DEBUGLOG
+	// check if the ack is positive or negative
 	if ( msg->success ) {
-		log->logCreateSuccess(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+		entry->second.positiveAcks++;
 	} else {
-		log->logCreateFail(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+		entry->second.negativeAcks++;
 	}
-#endif
 
-	if ( msg->success ) {
-		quorum.erase(msg->transID);
+	// check if quorum is reached (positive or negative)
+	if ( entry->second.positiveAcks == 2 ) {
+#ifdef DEBUGLOG
+		log->logCreateSuccess(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+#endif
+		quorums.erase(msg->transID);
+	} else if ( entry->second.negativeAcks == 2 ) {
+#ifdef DEBUGLOG
+		log->logCreateFail(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+#endif
+		quorums.erase(msg->transID);
 	}
 }
