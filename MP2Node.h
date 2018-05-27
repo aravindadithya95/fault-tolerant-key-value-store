@@ -19,6 +19,8 @@
 #include "Message.h"
 #include "Queue.h"
 
+#include<unordered_map>
+
 /**
  * CLASS NAME: MP2Node
  *
@@ -48,6 +50,15 @@ private:
 	// Object of Log
 	Log * log;
 
+	// Information for the coordinator to check for quorums
+	struct coordEntry {
+		string key;
+		string value;
+		int responses;
+	};
+	// Hash Map for response messages to check for quorums
+	unordered_map<int, coordEntry> quorum;
+
 public:
 	MP2Node(Member *memberNode, Params *par, EmulNet *emulNet, Log *log, Address *addressOfMember);
 	Member * getMemberNode() {
@@ -73,8 +84,8 @@ public:
 	// handle messages from receiving queue
 	void checkMessages();
 
-	// coordinator dispatches messages to corresponding nodes
-	void dispatchMessages(Message message);
+	// dispatch message to the corresponding node
+	void dispatchMessage(Message message, Address *addr);
 
 	// find the addresses of nodes that are responsible for a key
 	vector<Node> findNodes(string key);
@@ -87,6 +98,9 @@ public:
 
 	// stabilization protocol - handle multiple failures
 	void stabilizationProtocol();
+
+	void handleCREATE(Message *msg);
+	void handleREPLY(Message *msg);
 
 	~MP2Node();
 };

@@ -118,12 +118,34 @@ size_t MP2Node::hashFunction(string key) {
  * 				The function does the following:
  * 				1) Constructs the message
  * 				2) Finds the replicas of this key
- * 				3) Sends a message to the replica
+ * 				3) Sends a message to the replicas
  */
 void MP2Node::clientCreate(string key, string value) {
 	/*
-	 * Implement this
+	 * Step 1: Construct the message
 	 */
+	g_transID++;
+	Message messagePrimary(g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+	Message messageSecondary(g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+	Message messageTertiary(g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+
+	/*
+	 * Step 2: Find the replicas of this key
+	 */
+	vector<Node> replicas = findNodes(key);
+
+	/*
+	 * Step 3: Send message to the replicas
+	 */
+	if ( replicas.size() == 3 ) {
+		dispatchMessage(messagePrimary, replicas[0].getAddress());
+		dispatchMessage(messagePrimary, replicas[1].getAddress());
+		dispatchMessage(messagePrimary, replicas[2].getAddress());
+	}
+
+	// keep track of responses to check for quorum
+	coordEntry entry { key, value, 0 };
+	quorum[g_transID] = entry;
 }
 
 /**
@@ -180,10 +202,8 @@ void MP2Node::clientDelete(string key){
  * 			   	2) Return true or false based on success or failure
  */
 bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
-	/*
-	 * Implement this
-	 */
 	// Insert key, value, replicaType into the hash table
+	return ht->create(key, value);
 }
 
 /**
@@ -240,9 +260,6 @@ bool MP2Node::deletekey(string key) {
  * 				2) Handles the messages according to message types
  */
 void MP2Node::checkMessages() {
-	/*
-	 * Implement this. Parts of it are already implemented
-	 */
 	char * data;
 	int size;
 
@@ -261,16 +278,33 @@ void MP2Node::checkMessages() {
 
 		string message(data, data + size);
 
-		/*
-		 * Handle the message types here
-		 */
+		// deserialize the message string
+		Message msg(message);
 
+		switch ( msg.type ) {
+			case CREATE:
+				handleCREATE(&msg);
+				break;
+
+			case REPLY:
+				handleREPLY(&msg);
+				break;
+		}
 	}
 
 	/*
 	 * This function should also ensure all READ and UPDATE operation
 	 * get QUORUM replies
 	 */
+}
+
+/**
+ * FUNCTION NAME: dispatchMessage
+ *
+ * DESCRIPTION: This function dispatches the message to the corresponding node
+ */
+void MP2Node::dispatchMessage(Message message, Address *addr) {
+	emulNet->ENsend(&memberNode->addr, addr, message.toString());
 }
 
 /**
@@ -341,4 +375,56 @@ void MP2Node::stabilizationProtocol() {
 	/*
 	 * Implement this
 	 */
+}
+
+/**
+ * FUNCTION NAME: handleCREATE
+ *
+ * DESCRIPTION: Handle an incoming CREATE message
+ */
+void MP2Node::handleCREATE(Message *msg) {
+	g_transID++;
+
+	// enter the pair into the local hash table
+	bool success = createKeyValue(msg->key, msg->value, msg->replica);
+
+#ifdef DEBUGLOG
+	if ( success ) {
+		log->logCreateSuccess(&memberNode->addr, false, g_transID, msg->key, msg->value);
+	} else {
+		log->logCreateFail(&memberNode->addr, false, g_transID, msg->key, msg->value);
+	}
+#endif
+
+	// send response back to the coordinator
+	Message responseMsg(g_transID, memberNode->addr, REPLY, success);
+	responseMsg.transID = msg->transID;
+	dispatchMessage(responseMsg, &msg->fromAddr);
+}
+
+/**
+ * FUNCTION NAME: handleREPLY
+ *
+ * DESCRIPTION: Handle an incoming REPLY message
+ */
+void MP2Node::handleREPLY(Message *msg) {
+	unordered_map<int, coordEntry>::iterator entry = quorum.find(msg->transID);
+	if ( entry == quorum.end())	return;
+	if ( entry->second.responses == 0 && msg->success ) {
+		entry->second.responses = 1;
+		return;
+	}
+	g_transID++;
+
+#ifdef DEBUGLOG
+	if ( msg->success ) {
+		log->logCreateSuccess(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+	} else {
+		log->logCreateFail(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+	}
+#endif
+
+	if ( msg->success ) {
+		quorum.erase(msg->transID);
+	}
 }
