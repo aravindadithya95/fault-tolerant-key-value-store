@@ -22,6 +22,12 @@
 #include<unordered_map>
 
 /**
+ * Macros
+ */
+#define QUORUM_TIMEOUT 8
+
+
+/**
  * CLASS NAME: QuorumEntry
  * 
  * DESCRIPTION: This class stores information for the coordinator to check for quorums
@@ -33,22 +39,25 @@ public:
 	string value;
 	int positiveAcks;
 	int negativeAcks;
+	int time;
 
 	// constructor for CREATE and UPDATE quorum entry
-	QuorumEntry(MessageType type, string key, string value) {
+	QuorumEntry(MessageType type, string key, string value, int time) {
 		this->type = type;
 		this->key = key;
 		this->value = value;
 		positiveAcks = 0;
 		negativeAcks = 0;
+		this->time = time;
 	}
 
 	// constructor for READ and DELETE quorum entry
-	QuorumEntry(MessageType type, string key) {
+	QuorumEntry(MessageType type, string key, int time) {
 		this->type = type;
 		this->key = key;
 		positiveAcks = 0;
 		negativeAcks = 0;
+		this->time = time;
 	}
 };
 
@@ -130,6 +139,7 @@ public:
 	void handleDELETE(Message *msg);
 	void handleREPLY(Message *msg);
 	void handleREADREPLY(Message *msg);
+	void checkQuorumTimeouts();
 
 	~MP2Node();
 };

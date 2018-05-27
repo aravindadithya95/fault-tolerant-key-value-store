@@ -144,7 +144,7 @@ void MP2Node::clientCreate(string key, string value) {
 	}
 
 	// keep track of responses to check for quorum
-	QuorumEntry entry(CREATE, key, value);
+	QuorumEntry entry(CREATE, key, value, par->getcurrtime());
 	quorums.emplace(g_transID, entry);
 }
 
@@ -177,7 +177,7 @@ void MP2Node::clientRead(string key) {
 	}
 
 	// keep track of responses to check for quorum
-	QuorumEntry entry(READ, key);
+	QuorumEntry entry(READ, key, par->getcurrtime());
 	quorums.emplace(g_transID, entry);
 }
 
@@ -214,7 +214,7 @@ void MP2Node::clientUpdate(string key, string value) {
 	}
 
 	// keep track of responses to check for quorum
-	QuorumEntry entry(UPDATE, key, value);
+	QuorumEntry entry(UPDATE, key, value, par->getcurrtime());
 	quorums.emplace(g_transID, entry);
 }
 
@@ -247,7 +247,7 @@ void MP2Node::clientDelete(string key) {
 	}
 
 	// keep track of responses to check for quorum
-	QuorumEntry entry(DELETE, key);
+	QuorumEntry entry(DELETE, key, par->getcurrtime());
 	quorums.emplace(g_transID, entry);
 }
 
@@ -315,10 +315,6 @@ void MP2Node::checkMessages() {
 	char * data;
 	int size;
 
-	/*
-	 * Declare your local variables here
-	 */
-
 	// dequeue all messages and handle them
 	while ( !memberNode->mp2q.empty() ) {
 		/*
@@ -361,9 +357,10 @@ void MP2Node::checkMessages() {
 	}
 
 	/*
-	 * This function should also ensure all READ and UPDATE operation
-	 * get QUORUM replies
+	 * Ensure all requests timeout sometime, if quorum isn't reached
+	 * check QUORUM entries
 	 */
+	checkQuorumTimeouts();
 }
 
 /**
@@ -612,5 +609,36 @@ void MP2Node::handleREADREPLY(Message *msg) {
 		log->logReadFail(&memberNode->addr, true, ++g_transID, entry->second.key);
 #endif
 		quorums.erase(msg->transID);
+	}
+}
+
+/**
+ * FUNCTION NAME: checkQuorumTimeouts
+ *
+ * DESCRIPTION: Check quorum timeouts
+ */
+void MP2Node::checkQuorumTimeouts() {
+	// iterate over hashmap entries
+	unordered_map<int, QuorumEntry>::iterator it = quorums.begin();
+	while ( it != quorums.end() ) {
+		QuorumEntry entry = it->second;
+		// check if an entry has timed out
+		if ( par->getcurrtime() - entry.time > QUORUM_TIMEOUT ) {
+			g_transID++;
+#ifdef DEBUGLOG
+			if ( entry.type == CREATE ) {
+				log->logCreateFail(&memberNode->addr, true, g_transID, entry.key, entry.value);
+			} else if ( entry.type == READ ) {
+				log->logReadFail(&memberNode->addr, true, g_transID, entry.key);
+			} else if ( entry.type == UPDATE ) {
+				log->logUpdateFail(&memberNode->addr, true, g_transID, entry.key, entry.value);
+			} else if ( entry.type == DELETE ) {
+				log->logDeleteFail(&memberNode->addr, true, g_transID, entry.key);
+			}
+#endif
+			it = quorums.erase(it);
+		} else {
+			it++;
+		}
 	}
 }
