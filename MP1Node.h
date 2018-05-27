@@ -21,17 +21,13 @@
 #define TREMOVE 20
 #define TFAIL 5
 
-/*
- * Note: You can change/add any functions in MP1Node.{h,cpp}
- */
-
 /**
  * Message Types
  */
-enum MsgTypes{
+enum MsgTypes {
     JOINREQ,
     JOINREP,
-    DUMMYLASTMSGTYPE
+    GOSSIP
 };
 
 /**
@@ -41,7 +37,7 @@ enum MsgTypes{
  */
 typedef struct MessageHdr {
 	enum MsgTypes msgType;
-}MessageHdr;
+} MessageHdr;
 
 /**
  * CLASS NAME: MP1Node
@@ -73,9 +69,20 @@ public:
 	void nodeLoopOps();
 	int isNullAddress(Address *addr);
 	Address getJoinAddress();
-	void initMemberListTable(Member *memberNode);
+	void initMemberListTable(Member *memberNode, int id, short port);
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
+
+	char * serializeMemberList();
+	vector<MemberListEntry> deserializeMemberList(char *data, int size);
+	void handleJOINREQ(void *env, char *data, int size);
+	void handleJOINREP(void *env, char *data, int size);
+	void handleGOSSIP(void *env, char *data, int size);
+	void updateMemberList(vector<MemberListEntry> *inputList);
+	Address getAddress(int id, short port);
+	void gossipMemberList(int n=2);
+	void sendMemberList(MsgTypes msgType, Address *addr);
+	void removeFailedNodes();
 };
 
 #endif /* _MP1NODE_H_ */
