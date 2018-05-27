@@ -22,6 +22,32 @@
 #include<unordered_map>
 
 /**
+ * CLASS NAME: QuorumEntry
+ * 
+ * DESCRIPTION: This class stores information for the coordinator to check for quorums
+ */
+class QuorumEntry {
+public:
+	string key;
+	string value;
+	int positiveAcks;
+	int negativeAcks;
+
+	QuorumEntry(string key, string value) {
+		this->key = key;
+		this->value = value;
+		positiveAcks = 0;
+		negativeAcks = 0;
+	}
+
+	QuorumEntry(string key) {
+		this->key = key;
+		positiveAcks = 0;
+		negativeAcks = 0;
+	}
+};
+
+/**
  * CLASS NAME: MP2Node
  *
  * DESCRIPTION: This class encapsulates all the key-value store functionality
@@ -50,15 +76,8 @@ private:
 	// Object of Log
 	Log * log;
 
-	// Information for the coordinator to check for quorums
-	struct quorumEntry {
-		string key;
-		string value;
-		int positiveAcks;
-		int negativeAcks;
-	};
 	// Hash Map for response messages to check for quorums
-	unordered_map<int, quorumEntry> quorums;
+	unordered_map<int, QuorumEntry> quorums;
 
 public:
 	MP2Node(Member *memberNode, Params *par, EmulNet *emulNet, Log *log, Address *addressOfMember);
@@ -101,7 +120,9 @@ public:
 	void stabilizationProtocol();
 
 	void handleCREATE(Message *msg);
+	void handleREAD(Message *msg);
 	void handleREPLY(Message *msg);
+	void handleREADREPLY(Message *msg);
 
 	~MP2Node();
 };

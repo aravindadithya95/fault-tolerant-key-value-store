@@ -144,7 +144,7 @@ void MP2Node::clientCreate(string key, string value) {
 	}
 
 	// keep track of responses to check for quorum
-	quorumEntry entry { key, value, 0, 0 };
+	QuorumEntry entry(key, value);
 	quorums.emplace(g_transID, entry);
 }
 
@@ -162,7 +162,7 @@ void MP2Node::clientRead(string key){
 	 * Step 1: Construct the message
 	 */
 	g_transID++;
-	Message msg(g_transID, memberNode->addr, CREATE, key);
+	Message msg(g_transID, memberNode->addr, READ, key);
 
 	/*
 	 * Step 2: Find the replicas of this key
@@ -177,8 +177,8 @@ void MP2Node::clientRead(string key){
 	}
 
 	// keep track of responses to check for quorum
-	// coordEntry entry { key, value, 0, 0 };
-	// quorum[g_transID] = entry;
+	QuorumEntry entry(key);
+	quorums.emplace(g_transID, entry);
 }
 
 /**
@@ -233,10 +233,8 @@ bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
  * 			    2) Return value
  */
 string MP2Node::readKey(string key) {
-	/*
-	 * Implement this
-	 */
 	// Read key from local hash table and return value
+	return ht->read(key);
 }
 
 /**
@@ -303,9 +301,17 @@ void MP2Node::checkMessages() {
 			case CREATE:
 				handleCREATE(&msg);
 				break;
+			
+			case READ:
+				handleREAD(&msg);
+				break;
 
 			case REPLY:
 				handleREPLY(&msg);
+				break;
+
+			case READREPLY:
+				handleREADREPLY(&msg);
 				break;
 		}
 	}
@@ -425,9 +431,33 @@ void MP2Node::handleCREATE(Message *msg) {
  *
  * DESCRIPTION: Handle an incoming REPLY message
  */
+void MP2Node::handleREAD(Message *msg) {
+	g_transID++;
+
+	// find the key-value pair in the local hash table
+	string value = readKey(msg->key);
+
+#ifdef DEBUGLOG
+	if ( value.size() > 0 ) {
+		log->logReadSuccess(&memberNode->addr, false, g_transID, msg->key, value);
+	} else {
+		log->logReadFail(&memberNode->addr, false, g_transID, msg->key);
+	}
+#endif
+
+	// send response back to the coordinator
+	Message responseMsg(msg->transID, memberNode->addr, value);
+	dispatchMessage(responseMsg, &msg->fromAddr);
+}
+
+/**
+ * FUNCTION NAME: handleREPLY
+ *
+ * DESCRIPTION: Handle an incoming REPLY message
+ */
 void MP2Node::handleREPLY(Message *msg) {
 	// find the quorum entry
-	unordered_map<int, quorumEntry>::iterator entry = quorums.find(msg->transID);
+	unordered_map<int, QuorumEntry>::iterator entry = quorums.find(msg->transID);
 	if ( entry == quorums.end() )	return;
 
 	// check if the ack is positive or negative
@@ -437,15 +467,46 @@ void MP2Node::handleREPLY(Message *msg) {
 		entry->second.negativeAcks++;
 	}
 
-	// check if quorum is reached (positive or negative)
+	// check if quorum is reached (positive or negative) and then delete the entry
 	if ( entry->second.positiveAcks == 2 ) {
 #ifdef DEBUGLOG
-		log->logCreateSuccess(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+		log->logCreateSuccess(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
 #endif
 		quorums.erase(msg->transID);
 	} else if ( entry->second.negativeAcks == 2 ) {
 #ifdef DEBUGLOG
-		log->logCreateFail(&memberNode->addr, true, g_transID, entry->second.key, entry->second.value);
+		log->logCreateFail(&memberNode->addr, true, ++g_transID, entry->second.key, entry->second.value);
+#endif
+		quorums.erase(msg->transID);
+	}
+}
+
+/**
+ * FUNCTION NAME: handleREPLY
+ *
+ * DESCRIPTION: Handle an incoming READREPLY message
+ */
+void MP2Node::handleREADREPLY(Message *msg) {
+	// find the quorum entry
+	unordered_map<int, QuorumEntry>::iterator entry = quorums.find(msg->transID);
+	if ( entry == quorums.end() )	return;
+	
+	// check if the ack is positive or negative
+	if ( msg->value.size() > 0 ) {
+		entry->second.positiveAcks++;
+	} else {
+		entry->second.negativeAcks++;
+	}
+
+	// check if quorum is reached (positive or negative) and then delete the entry
+	if ( entry->second.positiveAcks == 2 ) {
+#ifdef DEBUGLOG
+		log->logReadSuccess(&memberNode->addr, true, ++g_transID, entry->second.key, msg->value);
+#endif
+		quorums.erase(msg->transID);
+	} else if ( entry->second.negativeAcks == 2 ) {
+#ifdef DEBUGLOG
+		log->logReadFail(&memberNode->addr, true, ++g_transID, entry->second.key);
 #endif
 		quorums.erase(msg->transID);
 	}
