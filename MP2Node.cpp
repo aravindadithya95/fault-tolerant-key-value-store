@@ -61,15 +61,15 @@ void MP2Node::updateRing() {
 		}
 	}
 
-	ring = curMemList;
-
 	/*
 	 * Step 3: Run the stabilization protocol IF REQUIRED
 	 */
 	// Run stabilization protocol if the hash table size is greater than zero and if there has been a changed in the ring
 	if ( !ht->isEmpty() && change ) {
-		stabilizationProtocol();
+		stabilizationProtocol(&curMemList);
 	}
+
+	ring = curMemList;
 }
 
 /**
@@ -436,10 +436,121 @@ int MP2Node::enqueueWrapper(void *env, char *buff, int size) {
  *				1) Ensures that there are three "CORRECT" replicas of all the keys in spite of failures and joins
  *				Note:- "CORRECT" replicas implies that every key is replicated in its two neighboring nodes in the ring
  */
-void MP2Node::stabilizationProtocol() {
-	/*
-	 * Implement this
-	 */
+void MP2Node::stabilizationProtocol(vector<Node> *curMemList) {
+	// iterate over the hashtable entries
+	map<string, string>::iterator it = ht->hashTable.begin();
+	while ( it != ht->hashTable.end() ) {
+		string key = it->first, value = it->second;
+
+		// get old and new replicas
+		vector<Node> oldReplicas = findNodes(key);
+		vector<Node> newReplicas = findReplicas(key, curMemList);
+
+		// if current node WAS the primary replica of the key
+		if ( memberNode->addr == oldReplicas[0].nodeAddress ) {
+			// check if it still IS the primary replica
+			if ( oldReplicas[0].nodeAddress == newReplicas[0].nodeAddress ) {
+				// check if tertiary replica has been promoted to secondary (secondary has failed)
+				if ( oldReplicas[2].nodeAddress == newReplicas[1].nodeAddress ) {
+					// send over pair to new tertiary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+					dispatchMessage(msg, newReplicas[2].getAddress());
+				}
+				// check if the secondary replica has failed and been replaced by a new peer
+				else if ( !(oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress) ) {
+					// send over pair to new secondary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+					dispatchMessage(msg, newReplicas[1].getAddress());
+				}
+				// check if the tertiary replica has failed (primary and secondary haven't)
+				else if ( !(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
+					// send over pair to new tertiary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+					dispatchMessage(msg, newReplicas[2].getAddress());
+				}
+			}
+			// if current node isn't the primary replica anymore
+			else {
+				// if current node IS secondary replica
+				if ( oldReplicas[0].nodeAddress == newReplicas[1].nodeAddress ) {
+					// new primary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+					dispatchMessage(msg, newReplicas[0].getAddress());
+				} else if ( oldReplicas[0].nodeAddress == newReplicas[2].nodeAddress ) {
+					// if current node IS tertiary replica
+					Message primaryMsg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+					Message secondaryMsg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+					dispatchMessage(primaryMsg, newReplicas[0].getAddress());
+					dispatchMessage(secondaryMsg, newReplicas[1].getAddress());
+				} else {
+					// new primary, secondary and tertiary replicas
+					Message primaryMsg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+					Message secondaryMsg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+					Message tertiaryMsg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+					dispatchMessage(primaryMsg, newReplicas[0].getAddress());
+					dispatchMessage(secondaryMsg, newReplicas[1].getAddress());
+					dispatchMessage(tertiaryMsg, newReplicas[2].getAddress());
+					
+					// delete entry since current node isn't a replica of this key
+					it = ht->hashTable.erase(it);
+					continue;
+				}
+			}
+		}
+		// if current node WAS the secondary replica
+		else if ( memberNode->addr == oldReplicas[1].nodeAddress ) {
+			// check if primary has changed
+			if ( !(oldReplicas[0].nodeAddress == newReplicas[0].nodeAddress) ) {
+				// new primary replica
+				Message msg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+				dispatchMessage(msg, newReplicas[0].getAddress());
+
+				// check if tertiary has changed
+				if ( !(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
+					// new tertiary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+					dispatchMessage(msg, newReplicas[2].getAddress());
+				}
+
+				// if primary has failed - take over the primary's work to recreate three replicas
+				if ( !(oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress) &&
+					!isPeerAlive(curMemList, &oldReplicas[0].nodeAddress) ) {
+					// new secondary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+					dispatchMessage(msg, newReplicas[1].getAddress());
+
+					// delete entry since current node isn't a replica of this key
+					it = ht->hashTable.erase(it);
+					continue;
+				}
+			}
+		}
+		// if current node was the tertiary replica
+		else if ( memberNode->addr == oldReplicas[1].nodeAddress ) {
+			// check if primary has changed
+			if ( !(oldReplicas[0].nodeAddress == newReplicas[0].nodeAddress) ) {
+				// new primary replica
+				Message msg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+				dispatchMessage(msg, newReplicas[0].getAddress());
+
+				// check if secondary has changed
+				if ( !(oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress) ) {
+					// new secondary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+					dispatchMessage(msg, newReplicas[1].getAddress());
+				}
+
+				// if primary and secondary have failed - take over the their work to recreate three replicas
+				if ( !isPeerAlive(curMemList, &oldReplicas[0].nodeAddress) &&
+					!isPeerAlive(curMemList, &oldReplicas[1].nodeAddress) ) {
+					// new tertiary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+					dispatchMessage(msg, newReplicas[2].getAddress());
+				}
+			}
+		}
+		it++;
+	}
 }
 
 /**
@@ -641,4 +752,50 @@ void MP2Node::checkQuorumTimeouts() {
 			it++;
 		}
 	}
+}
+
+/**
+ * FUNCTION NAME: findReplicas
+ *
+ * DESCRIPTION: Find the replicas of the given key in the given member list
+ * 				This function is responsible for finding the replicas of a key
+ */
+vector<Node> MP2Node::findReplicas(string key, vector<Node> *nodes) {
+	size_t pos = hashFunction(key);
+	vector<Node> addr_vec;
+	if (nodes->size() >= 3) {
+		// if pos <= min || pos > max, the leader is the min
+		if (pos <= nodes->at(0).getHashCode() || pos > nodes->at(nodes->size() - 1).getHashCode()) {
+			addr_vec.emplace_back(nodes->at(0));
+			addr_vec.emplace_back(nodes->at(1));
+			addr_vec.emplace_back(nodes->at(2));
+		}
+		else {
+			// go through the ring until pos <= node
+			for ( int i = 1; i < nodes->size(); i++ ){
+				Node addr = nodes->at(i);
+				if ( pos <= addr.getHashCode() ) {
+					addr_vec.emplace_back(addr);
+					addr_vec.emplace_back(nodes->at((i + 1) % nodes->size()));
+					addr_vec.emplace_back(nodes->at((i + 2) % nodes->size()));
+					break;
+				}
+			}
+		}
+	}
+	return addr_vec;
+}
+
+/**
+ * FUNCTION NAME: isPeerAlive
+ *
+ * DESCRIPTION: Check if the given peer exists in the given vector
+ */
+bool MP2Node::isPeerAlive(vector<Node> *nodes, Address *addr) {
+	for ( int i = 0; i < nodes->size(); i++ ) {
+		if ( nodes->at(i).nodeAddress == *addr ) {
+			return true;
+		}
+	}
+	return false;
 }

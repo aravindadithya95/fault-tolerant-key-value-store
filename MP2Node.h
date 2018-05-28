@@ -123,6 +123,7 @@ public:
 
 	// find the addresses of nodes that are responsible for a key
 	vector<Node> findNodes(string key);
+	vector<Node> findReplicas(string key, vector<Node> *nodes);
 
 	// server
 	bool createKeyValue(string key, string value, ReplicaType replica);
@@ -131,7 +132,7 @@ public:
 	bool deleteKey(string key);
 
 	// stabilization protocol - handle multiple failures
-	void stabilizationProtocol();
+	void stabilizationProtocol(vector<Node> *curMemList);
 
 	void handleCREATE(Message *msg);
 	void handleREAD(Message *msg);
@@ -140,6 +141,7 @@ public:
 	void handleREPLY(Message *msg);
 	void handleREADREPLY(Message *msg);
 	void checkQuorumTimeouts();
+	bool isPeerAlive(vector<Node> *nodes, Address *addr);
 
 	~MP2Node();
 };
