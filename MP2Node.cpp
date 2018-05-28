@@ -456,93 +456,119 @@ void MP2Node::stabilizationProtocol(vector<Node> *curMemList) {
 					Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
 					dispatchMessage(msg, newReplicas[2].getAddress());
 				}
-				// check if the secondary replica has failed and been replaced by a new peer
-				else if ( !(oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress) ) {
-					// send over pair to new secondary replica
-					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
-					dispatchMessage(msg, newReplicas[1].getAddress());
-				}
-				// check if the tertiary replica has failed (primary and secondary haven't)
-				else if ( !(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
-					// send over pair to new tertiary replica
-					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
-					dispatchMessage(msg, newReplicas[2].getAddress());
-				}
-			}
-			// if current node isn't the primary replica anymore
-			else {
-				// if current node IS secondary replica
-				if ( oldReplicas[0].nodeAddress == newReplicas[1].nodeAddress ) {
-					// new primary replica
-					Message msg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
-					dispatchMessage(msg, newReplicas[0].getAddress());
-				} else if ( oldReplicas[0].nodeAddress == newReplicas[2].nodeAddress ) {
-					// if current node IS tertiary replica
-					Message primaryMsg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
-					Message secondaryMsg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
-					dispatchMessage(primaryMsg, newReplicas[0].getAddress());
-					dispatchMessage(secondaryMsg, newReplicas[1].getAddress());
-				} else {
-					// new primary, secondary and tertiary replicas
-					Message primaryMsg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
-					Message secondaryMsg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
-					Message tertiaryMsg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
-					dispatchMessage(primaryMsg, newReplicas[0].getAddress());
-					dispatchMessage(secondaryMsg, newReplicas[1].getAddress());
-					dispatchMessage(tertiaryMsg, newReplicas[2].getAddress());
-					
-					// delete entry since current node isn't a replica of this key
-					it = ht->hashTable.erase(it);
-					continue;
+				else {
+					// check if the secondary replica has changed
+					if ( !(oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress) ) {
+						// send over pair to new secondary replica
+						Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+						dispatchMessage(msg, newReplicas[1].getAddress());
+					}
+					// check if the tertiary replica has changed
+					if ( !(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
+						// send over pair to new tertiary replica
+						Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+						dispatchMessage(msg, newReplicas[2].getAddress());
+					}
 				}
 			}
-		}
-		// if current node WAS the secondary replica
-		else if ( memberNode->addr == oldReplicas[1].nodeAddress ) {
-			// check if primary has changed
-			if ( !(oldReplicas[0].nodeAddress == newReplicas[0].nodeAddress) ) {
+			// if current node IS secondary replica
+			else if ( oldReplicas[0].nodeAddress == newReplicas[1].nodeAddress ) {
 				// new primary replica
 				Message msg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
 				dispatchMessage(msg, newReplicas[0].getAddress());
 
-				// check if tertiary has changed
+				// if tertiary replica has changed
 				if ( !(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
 					// new tertiary replica
 					Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
 					dispatchMessage(msg, newReplicas[2].getAddress());
 				}
+			}
+			// if current node IS tertiary replica
+			else if ( oldReplicas[0].nodeAddress == newReplicas[2].nodeAddress ) {
+				// new primary and secondary replicas
+				Message primaryMsg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+				Message secondaryMsg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+				dispatchMessage(primaryMsg, newReplicas[0].getAddress());
+				dispatchMessage(secondaryMsg, newReplicas[1].getAddress());
+			}
+			// if current node isn't a replica of this key anymore
+			else {
+				// new primary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+					dispatchMessage(msg, newReplicas[0].getAddress());
 
-				// if primary has failed - take over the primary's work to recreate three replicas
-				if ( !(oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress) &&
-					!isPeerAlive(curMemList, &oldReplicas[0].nodeAddress) ) {
+				if ( !(newReplicas[1].nodeAddress == oldReplicas[0].nodeAddress) ||
+					!(newReplicas[1].nodeAddress == oldReplicas[1].nodeAddress) ||
+					!(newReplicas[1].nodeAddress == oldReplicas[2].nodeAddress) ) {
 					// new secondary replica
 					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
 					dispatchMessage(msg, newReplicas[1].getAddress());
+				}
 
-					// delete entry since current node isn't a replica of this key
-					it = ht->hashTable.erase(it);
-					continue;
+				if ( !(newReplicas[2].nodeAddress == oldReplicas[0].nodeAddress) ||
+					!(newReplicas[2].nodeAddress == oldReplicas[1].nodeAddress) ||
+					!(newReplicas[2].nodeAddress == oldReplicas[2].nodeAddress) ) {
+					// new tertiary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+					dispatchMessage(msg, newReplicas[2].getAddress());
 				}
 			}
 		}
-		// if current node was the tertiary replica
+		// if current node WAS the secondary replica
 		else if ( memberNode->addr == oldReplicas[1].nodeAddress ) {
-			// check if primary has changed
-			if ( !(oldReplicas[0].nodeAddress == newReplicas[0].nodeAddress) ) {
+			// if primary has failed - take over the primary's work to recreate three replicas
+			if ( !isPeerAlive(curMemList, &oldReplicas[0].nodeAddress) ) {
 				// new primary replica
 				Message msg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
 				dispatchMessage(msg, newReplicas[0].getAddress());
 
-				// check if secondary has changed
-				if ( !(oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress) ) {
+				// if current node IS secondary replica
+				if ( oldReplicas[1].nodeAddress == newReplicas[1].nodeAddress ) {
+					// check tertiary replica
+					if ( !(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
+						// new tertiary replica
+						Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+						dispatchMessage(msg, newReplicas[2].getAddress());
+					}
+				} 
+				// if current node is tertiary replica
+				else if ( oldReplicas[1].nodeAddress == newReplicas[2].nodeAddress ) {
 					// new secondary replica
 					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
 					dispatchMessage(msg, newReplicas[1].getAddress());
 				}
+				// if current node is not a replica anymore
+				else {
+					// new secondary replica
+					Message msg(++g_transID, memberNode->addr, CREATE, key, value, SECONDARY);
+					dispatchMessage(msg, newReplicas[1].getAddress());
 
-				// if primary and secondary have failed - take over the their work to recreate three replicas
-				if ( !isPeerAlive(curMemList, &oldReplicas[0].nodeAddress) &&
-					!isPeerAlive(curMemList, &oldReplicas[1].nodeAddress) ) {
+					// check tertiary replica
+					if ( !(oldReplicas[2].nodeAddress == newReplicas[1].nodeAddress) ||
+						!(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
+						// new tertiary replica
+						Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
+						dispatchMessage(msg, newReplicas[2].getAddress());
+					}
+				}
+			}
+		}
+		// if current node WAS the tertiary replica
+		else if ( memberNode->addr == oldReplicas[2].nodeAddress ) {
+			// if primary and secondary have failed - take over the their work to recreate three replicas
+			if ( !isPeerAlive(curMemList, &oldReplicas[0].nodeAddress) &&
+				!isPeerAlive(curMemList, &oldReplicas[1].nodeAddress) ) {
+				// new primary replica
+				Message primaryMsg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+				dispatchMessage(primaryMsg, newReplicas[0].getAddress());
+
+				// new secondary replica
+				Message secondaryMsg(++g_transID, memberNode->addr, CREATE, key, value, PRIMARY);
+				dispatchMessage(secondaryMsg, newReplicas[1].getAddress());
+
+				// if current node isn't tertiary replica
+				if ( !(oldReplicas[2].nodeAddress == newReplicas[2].nodeAddress) ) {
 					// new tertiary replica
 					Message msg(++g_transID, memberNode->addr, CREATE, key, value, TERTIARY);
 					dispatchMessage(msg, newReplicas[2].getAddress());
